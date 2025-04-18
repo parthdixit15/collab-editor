@@ -1,0 +1,27 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  
+}
+
+body {
+  font-family: Arial, sans-serif;
+  line-height: 1.6;background: #282c34;
+}
+
+h1 {
+  padding: 20px;
+  background: #282c34; /* Subtle dark shade */
+  color: #61dafb; /* Soothing blue for the header */
+  text-align: center;
+  font-family: 'Courier New', monospace;
+  /*border-bottom: 2px solid #bb2020;  Accent color for contrast */
+}
+
+#editor {
+  height: 90vh;
+  border: 1px solid #ccc;
+  padding: 10px;
+  background: #090808;
+}
