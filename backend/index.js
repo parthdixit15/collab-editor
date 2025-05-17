@@ -5,20 +5,25 @@ import http from "http";
 import path from "path";
 import jwt from "jsonwebtoken";
 import { Server } from "socket.io";
-import { connectDB } from './db.js';
-import authRoutes from './auth.js';
+import { connectDB } from "./db.js";
+import authRoutes from "./auth.js";
+import Document from "./models/document.js";
 
 // Connect to MongoDB
 await connectDB();
 
 const app = express();
 
+// CORS for HTTP endpoints
 app.use(cors({
   origin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
   credentials: true
 }));
-// Middleware
+
+// JSON body parsing
 app.use(express.json());
+
+// Public auth routes
 app.use('/auth', authRoutes);
 
 // Protect /api routes with JWT
@@ -40,16 +45,17 @@ app.get('/api/ping', (req, res) => {
   res.json({ message: `pong - hello ${req.user.username}` });
 });
 
+// Create HTTP & Socket.IO servers
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_ORIGIN|| '*',
-    methods: ['GET', 'POST'],
+    origin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
+    methods: ['GET','POST'],
     credentials: true
   }
 });
 
-// Socket.IO handshake authentication
+// JWT auth for sockets
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) return next(new Error('Authentication token missing'));
@@ -61,43 +67,70 @@ io.use((socket, next) => {
   }
 });
 
+// In-memory room tracking
 const rooms = new Map();
 
 io.on("connection", (socket) => {
-  console.log("User connected:", socket.user.username);
-
-  let currentRoom = null;
   const currentUser = socket.user.username;
+  let currentRoom = null;
+  console.log("User connected:", currentUser);
 
-  socket.on("join", ({ roomId }) => {
-    // Leave previous room
+  // Join a room and load persisted document
+  socket.on("join", async ({ roomId }) => {
+    // Leave old room
     if (currentRoom) {
       socket.leave(currentRoom);
       rooms.get(currentRoom)?.delete(currentUser);
       io.to(currentRoom).emit("userJoined", [...(rooms.get(currentRoom) || [])]);
     }
-
+    // Join new room
     currentRoom = roomId;
     socket.join(roomId);
-
     if (!rooms.has(roomId)) rooms.set(roomId, new Set());
     rooms.get(roomId).add(currentUser);
-
     io.to(roomId).emit("userJoined", [...rooms.get(roomId)]);
+
+    // Load or create document
+    try {
+      let doc = await Document.findOne({ roomId });
+      if (!doc) doc = await Document.create({ roomId });
+      socket.emit("loadDocument", doc.content);
+    } catch (err) {
+      console.error("Error loading document", err);
+    }
   });
 
+  // Broadcast live code updates
   socket.on("codeChange", ({ roomId, code }) => {
     socket.to(roomId).emit("codeUpdate", code);
   });
 
+  // Broadcast typing notifications
   socket.on("typing", ({ roomId }) => {
     socket.to(roomId).emit("userTyping", currentUser);
   });
 
+  // Broadcast language changes
   socket.on("languageChange", ({ roomId, language }) => {
     io.to(roomId).emit("languageUpdate", language);
   });
 
+  // Persist document on save request
+  socket.on("saveDocument", async ({ roomId, code }) => {
+    try {
+      await Document.findOneAndUpdate(
+        { roomId },
+        { content: code, updatedAt: new Date() },
+        { upsert: true }
+      );
+      socket.emit("documentSaved", { success: true });
+    } catch (err) {
+      console.error("Save failed", err);
+      socket.emit("documentSaved", { success: false });
+    }
+  });
+
+  // Leave room
   socket.on("leaveRoom", () => {
     if (currentRoom) {
       rooms.get(currentRoom)?.delete(currentUser);
@@ -107,6 +140,7 @@ io.on("connection", (socket) => {
     }
   });
 
+  // Disconnect cleanup
   socket.on("disconnect", () => {
     if (currentRoom) {
       rooms.get(currentRoom)?.delete(currentUser);
@@ -116,7 +150,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// Serve frontend static files
+// Serve frontend
 const __dirname = path.resolve();
 app.use(express.static(path.join(__dirname, "/frontend/dist")));
 app.get("*", (req, res) => {
@@ -124,6 +158,4 @@ app.get("*", (req, res) => {
 });
 
 const port = process.env.PORT || 5000;
-server.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
-});
+server.listen(port, () => console.log(`Server running on port ${port}`));

@@ -25,15 +25,18 @@ export default function App() {
   const [language, setLanguage] = useState("javascript");
   const [code, setCode] = useState("// start code here");
   const [copySuccess, setCopySuccess] = useState("");
+
+  // Socket ref
   const socketRef = useRef(null);
 
-  // Initialize socket once authenticated
+  // Initialize socket once authenticated and set up all listeners
   useEffect(() => {
     if (!token) return;
     const socket = io(API_URL, { auth: { token } });
     socketRef.current = socket;
     setUserName(usernameInput);
 
+    // Collaboration events
     socket.on("userJoined", setUsers);
     socket.on("codeUpdate", setCode);
     socket.on("userTyping", (u) => {
@@ -42,8 +45,21 @@ export default function App() {
     });
     socket.on("languageUpdate", setLanguage);
 
+    // Load persisted content
+    socket.on("loadDocument", (savedCode) => {
+      setCode(savedCode);
+    });
+
+    // Acknowledge save
+    socket.on("documentSaved", ({ success }) => {
+      if (success) console.log("Document saved successfully.");
+      else console.error("Failed to save document.");
+    });
+
+    // Handle leaving on unload
     const beforeUnload = () => socket.emit("leaveRoom");
     window.addEventListener("beforeunload", beforeUnload);
+
     return () => {
       window.removeEventListener("beforeunload", beforeUnload);
       socket.disconnect();
@@ -81,7 +97,7 @@ export default function App() {
     setJoined(true);
   };
 
-  // Leave room and reset
+  // Leave room and reset state
   const leaveRoom = () => {
     socketRef.current?.emit("leaveRoom");
     setJoined(false);
@@ -91,7 +107,7 @@ export default function App() {
     setUsers([]);
   };
 
-  // Copy room ID
+  // Copy room ID to clipboard
   const copyRoomId = () => {
     navigator.clipboard.writeText(roomId);
     setCopySuccess("Copied!");
@@ -112,7 +128,7 @@ export default function App() {
     socketRef.current.emit("languageChange", { roomId, language: lang });
   };
 
-  // Render auth form if not authenticated
+  // Render login/signup form
   if (!token) {
     return (
       <div className="join-container">
@@ -148,7 +164,7 @@ export default function App() {
     );
   }
 
-  // Render join-room form if not joined
+  // Render join-room form
   if (!joined) {
     return (
       <div className="join-container">
@@ -197,6 +213,14 @@ export default function App() {
           <option value="java">Java</option>
           <option value="cpp">C++</option>
         </select>
+        <button
+          className="save-button"
+          onClick={() => {
+            socketRef.current.emit("saveDocument", { roomId, code });
+          }}
+        >
+          Save
+        </button>
         <button className="leave-button" onClick={leaveRoom}>Leave Room</button>
       </div>
       <div className="editor-wrapper">
