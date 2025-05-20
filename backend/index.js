@@ -14,6 +14,10 @@ await connectDB();
 
 const app = express();
 
+
+
+
+
 // CORS for HTTP endpoints
 app.use(cors({
   origin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
@@ -69,6 +73,8 @@ io.use((socket, next) => {
 
 // In-memory room tracking
 const rooms = new Map();
+// Debounce timers for auto-saving per room
+const saveTimers = new Map();
 
 io.on("connection", (socket) => {
   const currentUser = socket.user.username;
@@ -103,6 +109,18 @@ io.on("connection", (socket) => {
   // Broadcast live code updates
   socket.on("codeChange", ({ roomId, code }) => {
     socket.to(roomId).emit("codeUpdate", code);
+    clearTimeout(saveTimers.get(roomId));
+    saveTimers.set(roomId, setTimeout(async () => {
+      try {
+        await Document.findOneAndUpdate(
+          { roomId },
+          { content: code, updatedAt: new Date() },
+          { upsert: true }
+        );
+      } catch (e) {
+        console.error("Auto‐save failed", e);
+      }
+    }, 1000));  // wait 1s after the last keystroke
   });
 
   // Broadcast typing notifications
